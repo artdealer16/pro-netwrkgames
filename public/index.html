@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>p5.js Pong</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { 
+            background: #222; color: white; display: flex; 
+            flex-direction: column; align-items: center; font-family: sans-serif; 
+            margin: 0; padding: 20px;
+        }
+        
+        /* Screen management */
+        #login-screen, #waiting-screen, #game-container { text-align: center; }
+        .hidden { display: none !important; }
+
+        input { padding: 10px; font-size: 16px; margin: 5px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #0f0; border: none; font-weight: bold;}
+        
+        canvas { 
+            border: 4px solid #555; 
+            box-shadow: 0 0 20px rgba(0,0,0,0.5); 
+        }
+    </style>
+</head>
+<body>
+
+    <div id="login-screen">
+        <h1>P5.JS MULTIPLAYER PONG</h1>
+        <input type="text" id="roomInput" placeholder="Enter Room Name (e.g. room1)">
+        <br>
+        <button onclick="joinRoom()">JOIN GAME</button>
+        <p id="msg" style="color: yellow"></p>
+    </div>
+
+    <div id="waiting-screen" class="hidden">
+        <h2>Waiting for opponent...</h2>
+        <div style="font-size: 40px;">⏳</div>
+        <p>Room: <span id="roomNameDisplay" style="color:#0f0"></span></p>
+    </div>
+
+    <div id="game-container" class="hidden">
+        <div style="font-size: 24px; margin-bottom: 10px;">
+            <span id="score1">0</span> - <span id="score2">0</span>
+        </div>
+        </div>
+
+    <script>
+        let socket;
+        let myRole = 0; // 1 or 2
+        let gameState = null;
+        let isGameActive = false;
+
+        // Constants (Must match server)
+        const PADDLE_H = 100;
+        const PADDLE_W = 20;
+        const BALL_SIZE = 20;
+
+        function setup() {
+            // Create canvas but attach it to the game container
+            let cnv = createCanvas(800, 600);
+            cnv.parent('game-container');
+            
+            socket = io();
+            setupSocketListeners();
+            
+            noLoop(); // Don't loop draw until game starts
+        }
+
+        function draw() {
+            background(0); // Black background
+
+            if (!gameState) return;
+
+            // Draw Net
+            stroke(100);
+            line(width/2, 0, width/2, height);
+            noStroke();
+
+            // Draw Player 1 (Left)
+            fill(myRole === 1 ? '#0f0' : '#fff'); // Green if me
+            rect(gameState.p1.x, gameState.p1.y, PADDLE_W, PADDLE_H);
+
+            // Draw Player 2 (Right)
+            fill(myRole === 2 ? '#0f0' : '#fff'); // Green if me
+            rect(gameState.p2.x, gameState.p2.y, PADDLE_W, PADDLE_H);
+
+            // Draw Ball
+            fill(255);
+            rect(gameState.ball.x, gameState.ball.y, BALL_SIZE, BALL_SIZE);
+
+            // --- INPUT HANDLING ---
+            if (isGameActive) {
+                handleInput();
+            }
+        }
+
+        function handleInput() {
+            // We calculate Y based on keys, constrained to canvas
+            let y = myRole === 1 ? gameState.p1.y : gameState.p2.y;
+            const speed = 10;
+
+            if (keyIsDown(UP_ARROW) || keyIsDown(87)) { // 87 is 'W'
+                y -= speed;
+            }
+            if (keyIsDown(DOWN_ARROW) || keyIsDown(83)) { // 83 is 'S'
+                y += speed;
+            }
+
+            // Clamp to screen
+            y = constrain(y, 0, height - PADDLE_H);
+
+            // Send to server
+            socket.emit('move', { y: y });
+        }
+
+        // --- UI & SOCKET LOGIC ---
+
+        function joinRoom() {
+            const room = document.getElementById('roomInput').value;
+            if (!room) return alert("Enter a room name!");
+            
+            socket.emit('joinRoom', { room });
+            document.getElementById('roomNameDisplay').innerText = room;
+        }
+
+        function setupSocketListeners() {
+            socket.on('playerAssigned', (data) => {
+                myRole = data.role;
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('waiting-screen').classList.remove('hidden');
+            });
+
+            socket.on('gameStart', () => {
+                isGameActive = true;
+                document.getElementById('waiting-screen').classList.add('hidden');
+                document.getElementById('game-container').classList.remove('hidden');
+                loop(); // Start p5.js draw loop
+            });
+
+            socket.on('gameState', (state) => {
+                gameState = state;
+            });
+
+            socket.on('scoreUpdate', (scores) => {
+                document.getElementById('score1').innerText = scores.p1;
+                document.getElementById('score2').innerText = scores.p2;
+            });
+
+            socket.on('opponentLeft', () => {
+                isGameActive = false;
+                document.getElementById('game-container').classList.add('hidden');
+                document.getElementById('waiting-screen').classList.remove('hidden');
+                alert("Opponent Left!");
+            });
+            
+            socket.on('roomFull', (msg) => {
+                document.getElementById('msg').innerText = msg;
+            });
+        }
+    </script>
+</body>
+</html>
